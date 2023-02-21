@@ -9,7 +9,7 @@ download focal model from baidu pan, copy to folder ./checkpoints
 pip install -r requirements.txt
 ```
 
-# run the web demo 
+# run the demo 
 ```shell
     python iseg.py
 ```
