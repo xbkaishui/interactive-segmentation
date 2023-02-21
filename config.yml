@@ -1,5 +1,6 @@
 checkpoint-path: ./checkpoints/last_checkpoint.pth
+#checkpoint-path: /tmp/comb_last_checkpoint.pth
 cpu: True
 gpu: 0  # to use gpu, set cpu: False and gpu: <gpu_id>
-debug: False
+debug: True
 timing: False

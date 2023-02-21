@@ -1,10 +1,3 @@
-"""
-Usage:
-    With GPU:
-        python iseg.py --checkpoint=/path/to/checkpoint.pth --gpu=0
-    Without GPU:
-        python iseg.py --checkpoint=/path/to/checkpoint.pth --cpu
-"""
 import argparse
 import tkinter as tk
 
