@@ -73,6 +73,8 @@ def evaluate_sample(image, gt_mask, init_mask, predictor, max_iou_thr,
             num_pm = 0
         else:
             num_pm = 999
+
+        print(f"num pm {num_pm}")
             
         for click_indx in range(max_clicks):
             vis_pred = prev_mask

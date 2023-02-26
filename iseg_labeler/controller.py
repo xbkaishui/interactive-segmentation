@@ -6,7 +6,7 @@ from iseg_labeler.brush import Brush
 from isegm.inference import clicker
 from isegm.inference.predictors import get_predictor
 from isegm.utils.vis import draw_with_blend_and_clicks
-
+from loguru import logger
 
 class InteractiveController:
     def __init__(self, net, device, predictor_params, update_image_callback, prob_thresh=0.5):
@@ -58,6 +58,8 @@ class InteractiveController:
         })
         click = clicker.Click(is_positive=is_positive, coords=(y, x))
         self.clicker.add_click(click)
+        # todo
+        logger.info("click coords {}", (y, x))
         pred = self.predictor.get_prediction(self.clicker, prev_mask=self._init_mask)
 
         torch.cuda.empty_cache()
@@ -111,12 +113,15 @@ class InteractiveController:
     def finish_object(self):
         if self.current_object_prob is None:
             return
-
-        self._result_mask = np.maximum(self.result_mask, self.brush.get_brush_mask()[0])
+        if self.brush is not None:
+            self._result_mask = np.maximum(self.result_mask, self.brush.get_brush_mask()[0])
+        else:
+            self._result_mask = self.result_mask
         self.object_count += 1
         self.reset_last_object()
 
     def reset_last_object(self, update_image=True):
+        logger.info("rest clicks {}", self.clicker.get_clicks())
         self.states = []
         self.probs_history = []
         self.clicker.reset_clicks()

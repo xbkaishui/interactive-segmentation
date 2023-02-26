@@ -3,7 +3,7 @@ from isegm.model.modeling.segformer.segformer_head import SegFormerHead
 import torch
 import torch.nn as nn
 from contextlib import ExitStack
-
+from loguru import logger
 
 
 class SegFormer(nn.Module):
@@ -12,7 +12,7 @@ class SegFormer(nn.Module):
                  **kwargs):
         super(SegFormer, self).__init__()
         self.backbone_name = backbone
-
+        logger.info("backbone name {}", backbone)
 
         self._kwargs = kwargs
         if backbone == 'b0':

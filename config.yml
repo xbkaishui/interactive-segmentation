@@ -3,4 +3,4 @@ checkpoint-path: ./checkpoints/last_checkpoint.pth
 cpu: True
 gpu: 0  # to use gpu, set cpu: False and gpu: <gpu_id>
 debug: True
-timing: False
+timing: True

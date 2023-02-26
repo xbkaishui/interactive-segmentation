@@ -18,3 +18,4 @@ timm
 torch
 torchvision
 tqdm
+loguru

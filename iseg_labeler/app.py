@@ -11,6 +11,7 @@ import numpy as np
 from iseg_labeler.canvas import CanvasImage
 from iseg_labeler.controller import InteractiveController
 from iseg_labeler.wrappers import (FocusHorizontalScale, FocusButton, FocusLabelFrame)
+import traceback
 
 class ISegApp(ttk.Frame):
     def __init__(self, master, args, model):
@@ -544,6 +545,8 @@ class ISegApp(ttk.Frame):
             if self._timing:
                 end = time.perf_counter_ns()
                 print(f"reload_image() took {(end - start) / 1e6} ms")
+        # print("print update image trace")
+        # traceback.print_stack()
 
     def _set_click_dependent_widgets_state(self):
         after_1st_click_state = tk.NORMAL if self.controller.is_incomplete_mask else tk.DISABLED
