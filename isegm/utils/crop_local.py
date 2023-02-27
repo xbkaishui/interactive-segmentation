@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 from skimage.measure import label   
+from loguru import logger
 
 def map_point_in_bbox(y,x,y1,y2,x1,x2,crop_l):
     h,w = y2-y1, x2-x1
@@ -9,17 +10,29 @@ def map_point_in_bbox(y,x,y1,y2,x1,x2,crop_l):
     x = (x - x1) * rx
     return y,x
 
-
  
 def get_focus_cropv1(pred_mask, previous_mask, global_roi, y,x, ratio):
     pred_mask = pred_mask > 0.49
     previous_mask = previous_mask > 0.49
-    ymin,ymax,xmin,xmax =  global_roi
+    ymin,ymax,xmin,xmax = global_roi
+    previous_mask_to_save = previous_mask.squeeze() * 255
+    cv2.imwrite("/tmp/previous_mask.jpg", previous_mask_to_save)
+
     diff_regions = np.logical_xor(previous_mask, pred_mask)
+    logger.info("pred_mask {}", pred_mask.shape)
+    logger.info("previous_mask {}", previous_mask[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
+    logger.info("diff_regions {}", diff_regions[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
+
+    pred_mask_to_save = pred_mask.squeeze() * 255
+    cv2.imwrite("/tmp/pred_mask.jpg", pred_mask_to_save)
+
+    diff_regions_to_save = diff_regions.squeeze() * 255
+    cv2.imwrite("/tmp/diff.jpg", diff_regions_to_save)
+
     if previous_mask.sum() == 0:
         y1,y2,x1,x2 = get_bbox_from_mask(pred_mask)
     else:
-        num, labels = cv2.connectedComponents( diff_regions.astype(np.uint8))
+        num, labels = cv2.connectedComponents(diff_regions.astype(np.uint8))
         label = labels[y,x]
         diff_conn_mask = labels == label    
         y1d,y2d,x1d,x2d = get_bbox_from_mask(diff_conn_mask)
@@ -34,8 +47,18 @@ def get_focus_cropv1(pred_mask, previous_mask, global_roi, y,x, ratio):
             y1,y2,x1,x2 = y - r *l, y + r * l, x - r * l, x + r * l
         else:
             y1,y2,x1,x2 = y1d,y2d,x1d,x2d
-    
-    y1,y2,x1,x2 = expand_bbox(pred_mask,y1,y2,x1,x2,ratio )
+
+    mask_1 = np.zeros(pred_mask.squeeze().shape)
+    mask_1[max(y1,ymin):min(y2,ymax), max(x1,xmin):min(x2,xmax)] = 1
+    cv2.imwrite("/tmp/pred_bbox.jpg", mask_1*255)
+
+    logger.info("before expand_bbox {} ratio {}", (y1,y2,x1,x2), ratio)
+    y1,y2,x1,x2 = expand_bbox(pred_mask,y1,y2,x1,x2,ratio)
+
+    mask_2 = np.zeros(pred_mask.squeeze().shape)
+    mask_2[max(y1,ymin):min(y2,ymax), max(x1,xmin):min(x2,xmax)] = 1
+    cv2.imwrite("/tmp/expand_bbox.jpg", mask_2 * 255)
+    logger.info("after expand_bbox {}", (y1,y2,x1,x2))
     y1 = max(y1,ymin)
     y2 = min(y2,ymax)
     x1 = max(x1,xmin)

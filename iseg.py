@@ -7,6 +7,7 @@ from isegm.inference import utils
 from iseg_labeler.app import ISegApp
 
 import yaml
+from loguru import logger
 
 with open('config.yml', 'r') as stream:
     config = yaml.safe_load(stream)
@@ -17,7 +18,8 @@ def main():
     torch.backends.cudnn.deterministic = True
     checkpoint_path = args.checkpoint
     model = utils.load_is_model(checkpoint_path, args.device, cpu_dist_maps=True)
-
+    logger.info("model type {}", type(model))
+    logger.info("model {}", model)
     root = tk.Tk()
     root.minsize(960, 960)
     app = ISegApp(root, args, model)

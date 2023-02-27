@@ -8,6 +8,7 @@ from isegm.inference.predictors import get_predictor
 from isegm.utils.vis import draw_with_blend_and_clicks
 from loguru import logger
 
+
 class InteractiveController:
     def __init__(self, net, device, predictor_params, update_image_callback, prob_thresh=0.5):
         self.net = net
@@ -60,8 +61,11 @@ class InteractiveController:
         self.clicker.add_click(click)
         # todo
         logger.info("click coords {}", (y, x))
-        pred = self.predictor.get_prediction(self.clicker, prev_mask=self._init_mask)
-
+        previous_mask = self.result_mask
+        previous_mask = previous_mask.astype(np.uint8)
+        pred = self.predictor.get_prediction(self.clicker, prev_mask=None)
+        # pred = self.predictor.get_prediction(self.clicker, prev_mask=torch.from_numpy(previous_mask).unsqueeze(0).unsqueeze(0))
+        logger.info("pred shape {} \n values {}", pred.shape, pred)
         torch.cuda.empty_cache()
 
         if self.probs_history:

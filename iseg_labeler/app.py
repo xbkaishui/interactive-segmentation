@@ -39,7 +39,8 @@ class ISegApp(ttk.Frame):
         self.brush_modes = ['Foreground', 'Background', 'Erase Brushstrokes']
 
         self.controller = InteractiveController(model, args.device,
-                                                predictor_params={'brs_mode': 'NoBRS'},
+                                                predictor_params={'brs_mode': 'FocalClick'},
+                                                # predictor_params={'brs_mode': 'NoBRS'},
                                                 update_image_callback=self._update_image)
 
         self.click_update_size_slider = None

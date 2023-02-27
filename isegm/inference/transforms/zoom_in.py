@@ -4,6 +4,7 @@ from typing import List
 from isegm.inference.clicker import Click
 from isegm.utils.misc import get_bbox_iou
 from .base import BaseTransform
+import cv2
 
 
 class ZoomIn(BaseTransform):
@@ -49,6 +50,10 @@ class ZoomIn(BaseTransform):
         self._object_roi = get_object_roi(image_nd, click_y, click_x, self.target_size)
         self._roi_image = get_roi_image_nd(image_nd, self._object_roi)
 
+        # todo save image
+        img_to_save = (self._roi_image[:,0:3,:,:]).squeeze() * 255
+        cv2.imwrite("/tmp/zoom_img.jpg", img_to_save.permute(1,2,0).numpy())
+
         self.image_changed = True
         tclicks_lists = [self._transform_clicks(clicks_list)]
 
@@ -56,7 +61,7 @@ class ZoomIn(BaseTransform):
 
     def inv_transform(self, prob_map):
         if self._object_roi is None:
-            self._prev_probs = prob_map.cpu().numpy()
+            self._prev_probs = prob_map.cpu().numpy().copy()
             return prob_map
 
         assert prob_map.shape[0] == 1
