@@ -1,11 +1,12 @@
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from isegm.inference.transforms import AddHorizontalFlip, SigmoidForPred, LimitLongestSide, ResizeTrans
-from isegm.utils.crop_local import map_point_in_bbox,get_focus_cropv1
+from isegm.inference.transforms import AddHorizontalFlip, SigmoidForPred, LimitLongestSide, ResizeTrans, ZoomIn
+from isegm.utils.crop_local import map_point_in_bbox, get_focus_cropv1, draw_mask_on_image
 from loguru import logger
 import cv2
 import copy
+import numpy as np
 
 debug = True
 
@@ -49,6 +50,8 @@ class FocalPredictor(object):
             self.transforms.append(AddHorizontalFlip())
 
     def set_input_image(self, image):
+        self.rgb_original_image = torch.from_numpy(image).numpy()
+        logger.info("rgb_original_image shape {}", self.rgb_original_image.shape)
         image_nd = self.to_tensor(image)
         for transform in self.transforms:
             transform.reset()
@@ -60,6 +63,16 @@ class FocalPredictor(object):
     def set_prev_mask(self, mask):
         self.prev_prediction = torch.from_numpy(mask).unsqueeze(0).unsqueeze(0).to(self.device).float()
 
+    def update_zoom_in(self, zoom_in_params):
+        # Updates target size, skip clicks, and expansion ratio of last zoom-in transform
+        if zoom_in_params is None:
+            return
+        for t in reversed(self.transforms):
+            if isinstance(t, ZoomIn):
+                t.target_size = zoom_in_params.get('target_size')
+                t.skip_clicks = zoom_in_params.get('skip_clicks')
+                t.expansion_ratio = zoom_in_params.get('expansion_ratio')
+                return
     def get_prediction(self, clicker, prev_mask=None):
         clicks_list = clicker.get_clicks()
         click = clicks_list[-1]
@@ -84,8 +97,8 @@ class FocalPredictor(object):
             input_image = torch.cat((input_image, prev_mask), dim=1)
 
         if debug:
-            previous_mask_to_save = prev_mask.squeeze() * 255
-            cv2.imwrite("/tmp/prev_mask.jpg", previous_mask_to_save.numpy())
+            c_input_mask = draw_mask_on_image(self.rgb_original_image, prev_mask.squeeze(), clicks_list=clicks_list)
+            cv2.imwrite("/tmp/c_input_mask.jpg", c_input_mask)
 
         image_nd, clicks_lists = self.apply_transforms(
             input_image, [clicks_list]
@@ -94,69 +107,81 @@ class FocalPredictor(object):
         # for debug purpose todo save image
         if debug:
             img_to_save = image_nd[:, 0:3, :, :].squeeze() * 255
-            cv2.imwrite("/tmp/after_apply_transforms.jpg", img_to_save.permute(1, 2, 0).numpy())
-            previous_mask_to_save = prev_mask.squeeze() * 255
-            cv2.imwrite("/tmp/prev_mask2.jpg", previous_mask_to_save.numpy())
+            # cv2.imwrite("/tmp/after_apply_transforms.jpg", img_to_save.permute(1, 2, 0).numpy())
         try:
             roi = self.transforms[0]._object_roi
-            y1,y2,x1,x2 = roi
-            global_roi = (y1,y2+1,x1,x2+1)
+            y1, y2, x1, x2 = roi
+            global_roi = (y1, y2 + 1, x1, x2 + 1)
+            if debug:
+                input_crop_image = np.zeros_like(prev_mask.squeeze())
+                input_crop_image[y1:y2 + 1, x1:x2 + 1] = 1
+                c_input_crop = draw_mask_on_image(self.rgb_original_image, input_crop_image, clicks_list=clicks_list)
+                cv2.imwrite("/tmp/c_input_crop.jpg", c_input_crop)
         except:
-            h,w = prev_mask.shape[-2],prev_mask.shape[-1]
+            h,w = prev_mask.shape[-2], prev_mask.shape[-1]
             global_roi = (0,h,0,w)            
         self.global_roi = global_roi
         logger.info("global roi {}", global_roi)
 
-        pred_logits, feature= self._get_prediction(image_nd, clicks_lists)
-        # previous_mask_to_save = prev_mask.squeeze() * 255
-        # cv2.imwrite("/tmp/prev_mask3.jpg", previous_mask_to_save.numpy())
+        pred_logits, feature = self._get_prediction(image_nd, clicks_lists)
         prediction = F.interpolate(pred_logits, mode='bilinear', align_corners=True,
                                    size=image_nd.size()[2:])
 
         prev_mask_copied = copy.deepcopy(prev_mask)
-        # previous_mask_to_save = prev_mask.squeeze() * 255
-        # cv2.imwrite("/tmp/prev_mask4.jpg", previous_mask_to_save.numpy())
         for t in reversed(self.transforms):
             logger.info("transform {}", t)
             prediction = t.inv_transform(prediction)
         prev_mask = prev_mask_copied
-        # previous_mask_to_save = prev_mask.squeeze() * 255
-        # cv2.imwrite("/tmp/prev_mask5.jpg", previous_mask_to_save.numpy())
         prediction = torch.log(prediction/(1-prediction))
         coarse_mask = prediction
         logger.info("coarse_mask shape {}", coarse_mask.shape)
-        # prev_mask = prev_mask
         clicks_list = clicker.get_clicks()
-        image_full = self.original_image
 
         coarse_mask_np = coarse_mask.cpu().numpy()[0, 0] 
         prev_mask_np = prev_mask.cpu().numpy()[0, 0] 
         logger.info("coarse_mask_np {}", coarse_mask_np[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
         logger.info("prev_mask_np {}", prev_mask_np[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
-        y1,y2,x1,x2 = get_focus_cropv1(coarse_mask_np,prev_mask_np, global_roi, last_y,last_x, self.focus_crop_r)
+        y1, y2, x1, x2 = get_focus_cropv1(coarse_mask_np, prev_mask_np, global_roi, last_y, last_x, self.focus_crop_r, self.rgb_original_image, [click])
 
-        focus_roi = (y1,y2,x1,x2)
+        focus_roi = (y1, y2, x1, x2)
         self.focus_roi = focus_roi
         logger.info("focus_roi {}", focus_roi)
         focus_roi_in_global_roi = self.mapp_roi(focus_roi, global_roi)
-        focus_pred = self._get_refine(pred_logits,image_full,clicks_list, feature, focus_roi, focus_roi_in_global_roi)#.cpu().numpy()[0, 0]
-        logger.info("focus_pred {}", focus_pred)
-        # cv2.imwrite("/tmp/focus_pred.jpg", focus_pred)
-        focus_pred = F.interpolate(focus_pred,(y2-y1,x2-x1),mode='bilinear',align_corners=True)#.cpu().numpy()[0, 0]
+        focus_pred = self._get_refine(pred_logits, self.original_image, clicks_list, feature, focus_roi, focus_roi_in_global_roi)#.cpu().numpy()[0, 0]
+        focus_pred = F.interpolate(focus_pred, (y2-y1, x2-x1), mode='bilinear',align_corners=True)#.cpu().numpy()[0, 0]
 
         if len(clicks_list) > 10:
             coarse_mask = self.prev_prediction
-            coarse_mask = torch.log( coarse_mask/(1-coarse_mask)  )
-        coarse_mask[:,:,y1:y2,x1:x2] = focus_pred
-        coarse_mask = torch.sigmoid(coarse_mask)
+            coarse_mask = torch.log(coarse_mask/(1-coarse_mask))
+        focus_pred_sigmoid = torch.sigmoid(focus_pred)
+        # todo del
+        coarse_mask[:,:, y1: y2, x1: x2] = focus_pred_sigmoid
+        prev_mask[:,:, y1:y2, x1:x2] = focus_pred_sigmoid
+        if debug:
+            w, h, c = self.rgb_original_image.shape
+            r_output_crop_img = np.zeros((w, h))
+            focus_pred_res = torch.sigmoid(focus_pred)
+            focus_pred_res[focus_pred_res > 0.5] = 1
+            focus_pred_res[focus_pred_res < 0.5] = 0
+            r_output_crop_img[y1:y2, x1:x2] = focus_pred_res
+            r_output_predict_image = draw_mask_on_image(self.rgb_original_image, r_output_crop_img)
+            cv2.imwrite("/tmp/r_output_predict.jpg", r_output_predict_image)
+            coarse_mask_res = coarse_mask.squeeze()
+            coarse_mask_res[y1:y2, x1:x2] = focus_pred_res
+            coarse_mask_res[coarse_mask_res > 0.5] = 1
+            coarse_mask_res[coarse_mask_res < 0.5] = 0
+            r_output_full_image = draw_mask_on_image(self.rgb_original_image, coarse_mask_res)
+            cv2.imwrite("/tmp/r_output_full.jpg", r_output_full_image)
 
-        coarse_mask_to_save = coarse_mask.squeeze() > .5
-        coarse_mask_to_save = coarse_mask_to_save * 255
-        cv2.imwrite("/tmp/coarse_mask.jpg", coarse_mask_to_save.numpy())
-
-        self.prev_prediction = coarse_mask
-        self.transforms[0]._prev_probs = coarse_mask.cpu().numpy()
-        return coarse_mask.cpu().numpy()[0, 0]
+            prev_mask_res = prev_mask.squeeze()
+            prev_mask_res[y1:y2, x1:x2] = focus_pred_res
+            prev_mask_res_img = draw_mask_on_image(self.rgb_original_image, prev_mask_res)
+            cv2.imwrite("/tmp/r_output_pre_mask.jpg", prev_mask_res_img)
+        # todo why all sigmoid
+        # coarse_mask = torch.sigmoid(coarse_mask)
+        self.prev_prediction = prev_mask
+        self.transforms[0]._prev_probs = prev_mask.cpu().numpy()
+        return prev_mask.cpu().numpy()[0, 0]
 
     def _get_prediction(self, image_nd, clicks_lists):
         points_nd = self.get_points_nd(clicks_lists)
@@ -164,22 +189,23 @@ class FocalPredictor(object):
         return output['instances'], output['feature']
 
     def _get_refine(self, coarse_mask, image, clicks, feature, focus_roi, focus_roi_in_global_roi):
-        y1,y2,x1,x2 = focus_roi
-        image_focus = image[:,:,y1:y2,x1:x2]
-        image_focus = F.interpolate(image_focus,(self.crop_l,self.crop_l),mode='bilinear',align_corners=True)
+        y1, y2, x1, x2 = focus_roi
         if debug:
-            image_focus_to_save = image_focus.squeeze() * 255
-            cv2.imwrite("/tmp/image_focus.jpg", image_focus_to_save.permute(1, 2, 0).numpy())
-
+            w, h, c = self.rgb_original_image.shape
+            r_input_crop_image = np.zeros((w, h))
+            r_input_crop_image[y1:y2, x1:x2] = 1
+            r_input_crop = draw_mask_on_image(self.rgb_original_image, r_input_crop_image)
+            cv2.imwrite("/tmp/r_input_crop.jpg", r_input_crop)
+        image_focus = image[:, :, y1:y2, x1:x2]
+        image_focus = F.interpolate(image_focus,(self.crop_l, self.crop_l), mode='bilinear', align_corners=True)
         mask_focus = coarse_mask
         points_nd = self.get_points_nd_inbbox(clicks,y1,y2,x1,x2)
-        y1,y2,x1,x2 = focus_roi_in_global_roi
-        roi = torch.tensor([0,x1, y1, x2, y2]).unsqueeze(0).float().to(image_focus.device)
+        y1, y2, x1, x2 = focus_roi_in_global_roi
+        logger.info("refine network focus_roi {}, focus_roi_in_global_roi {}", focus_roi, focus_roi_in_global_roi)
+        roi = torch.tensor([0, x1, y1, x2, y2]).unsqueeze(0).float().to(image_focus.device)
 
-        pred = self.net.refine(image_focus,points_nd, feature, mask_focus, roi) #['instances_refined'] 
+        pred = self.net.refine(image_focus, points_nd, feature, mask_focus, roi) #['instances_refined']
         focus_coarse, focus_refined = pred['instances_coarse'], pred['instances_refined']
-        # self.focus_coarse = torch.sigmoid(focus_coarse).cpu().numpy()[0, 0] * 255
-        # self.focus_refined = torch.sigmoid(focus_refined).cpu().numpy()[0, 0] * 255
         return focus_refined
 
 

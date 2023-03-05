@@ -276,7 +276,8 @@ class ISegApp(ttk.Frame):
                 self.master.title(os.path.basename(filename))   # set window title
                 self._image_path = Path(filename)
                 self._mask_path = None
-                image = cv2.cvtColor(cv2.imread(filename, 0), cv2.COLOR_GRAY2RGB)
+                image = cv2.imread(filename)
+                # image = cv2.cvtColor(cv2.imread(filename, 0), cv2.COLOR_GRAY2RGB)
                 self.controller.set_image(image)
                 self.save_mask_btn.configure(state=tk.NORMAL)
                 self.load_mask_btn.configure(state=tk.NORMAL)

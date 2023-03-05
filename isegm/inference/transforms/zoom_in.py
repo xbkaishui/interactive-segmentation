@@ -51,8 +51,8 @@ class ZoomIn(BaseTransform):
         self._roi_image = get_roi_image_nd(image_nd, self._object_roi)
 
         # todo save image
-        img_to_save = (self._roi_image[:,0:3,:,:]).squeeze() * 255
-        cv2.imwrite("/tmp/zoom_img.jpg", img_to_save.permute(1,2,0).numpy())
+        # img_to_save = (self._roi_image[:,0:3,:,:]).squeeze() * 255
+        # cv2.imwrite("/tmp/zoom_img.jpg", img_to_save.permute(1,2,0).numpy())
 
         self.image_changed = True
         tclicks_lists = [self._transform_clicks(clicks_list)]
@@ -151,8 +151,8 @@ def check_object_roi(object_roi, clicks_list):
 def get_object_roi(image_nd, click_y, click_x, target_size):
     img_h = image_nd.shape[2]
     img_w = image_nd.shape[3]
-    crop_h = target_size
-    crop_w = target_size
+    crop_h = min(img_h, target_size)
+    crop_w = min(img_w, target_size)
     crop_start_x = max(0, click_x - crop_w // 2)
     crop_start_x = min(img_w - crop_w, crop_start_x)
     crop_start_y = max(0, click_y - crop_h // 2)

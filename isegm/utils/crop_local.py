@@ -1,7 +1,10 @@
 import numpy as np
 import cv2
+import torch
 from skimage.measure import label   
 from loguru import logger
+from functools import lru_cache
+
 
 def map_point_in_bbox(y,x,y1,y2,x1,x2,crop_l):
     h,w = y2-y1, x2-x1
@@ -11,23 +14,32 @@ def map_point_in_bbox(y,x,y1,y2,x1,x2,crop_l):
     return y,x
 
  
-def get_focus_cropv1(pred_mask, previous_mask, global_roi, y,x, ratio):
-    pred_mask = pred_mask > 0.49
-    previous_mask = previous_mask > 0.49
+def get_focus_cropv1(pred_mask, previous_mask, global_roi, y,x, ratio, rgb_original_image, clicks_list):
+    """
+    pred_mask coarse 网络的预测mask
+    previous_mask 上一次的预测mask
+    global_roi, input crop 区域
+    x,y 点击的坐标
+    ratio 扩张系数 1.4
+    """
+    pred_mask = pred_mask > 0.5
+    previous_mask = previous_mask > 0.5
     ymin,ymax,xmin,xmax = global_roi
-    previous_mask_to_save = previous_mask.squeeze() * 255
-    cv2.imwrite("/tmp/previous_mask.jpg", previous_mask_to_save)
+
+    c_output_predict = draw_mask_on_image(rgb_original_image, pred_mask.squeeze())
+    cv2.imwrite("/tmp/c_output_predict.jpg", c_output_predict)
 
     diff_regions = np.logical_xor(previous_mask, pred_mask)
     logger.info("pred_mask {}", pred_mask.shape)
-    logger.info("previous_mask {}", previous_mask[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
-    logger.info("diff_regions {}", diff_regions[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
+    # logger.info("previous_mask {}", previous_mask[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
+    # logger.info("diff_regions {}", diff_regions[global_roi[0]:global_roi[1], global_roi[2]:global_roi[3]])
 
-    pred_mask_to_save = pred_mask.squeeze() * 255
-    cv2.imwrite("/tmp/pred_mask.jpg", pred_mask_to_save)
-
-    diff_regions_to_save = diff_regions.squeeze() * 255
-    cv2.imwrite("/tmp/diff.jpg", diff_regions_to_save)
+    # pred_mask_to_save = pred_mask.squeeze() * 255
+    # cv2.imwrite("/tmp/pred_mask.jpg", pred_mask_to_save)
+    diff = draw_mask_on_image(rgb_original_image, diff_regions.squeeze(), clicks_list=clicks_list)
+    cv2.imwrite("/tmp/diff.jpg", diff)
+    # diff_regions_to_save = diff_regions.squeeze() * 255
+    # cv2.imwrite("/tmp/diff.jpg", diff_regions_to_save)
 
     if previous_mask.sum() == 0:
         y1,y2,x1,x2 = get_bbox_from_mask(pred_mask)
@@ -47,23 +59,20 @@ def get_focus_cropv1(pred_mask, previous_mask, global_roi, y,x, ratio):
             y1,y2,x1,x2 = y - r *l, y + r * l, x - r * l, x + r * l
         else:
             y1,y2,x1,x2 = y1d,y2d,x1d,x2d
-
-    mask_1 = np.zeros(pred_mask.squeeze().shape)
-    mask_1[max(y1,ymin):min(y2,ymax), max(x1,xmin):min(x2,xmax)] = 1
-    cv2.imwrite("/tmp/pred_bbox.jpg", mask_1*255)
-
     logger.info("before expand_bbox {} ratio {}", (y1,y2,x1,x2), ratio)
     y1,y2,x1,x2 = expand_bbox(pred_mask,y1,y2,x1,x2,ratio)
-
-    mask_2 = np.zeros(pred_mask.squeeze().shape)
-    mask_2[max(y1,ymin):min(y2,ymax), max(x1,xmin):min(x2,xmax)] = 1
-    cv2.imwrite("/tmp/expand_bbox.jpg", mask_2 * 255)
     logger.info("after expand_bbox {}", (y1,y2,x1,x2))
-    y1 = max(y1,ymin)
-    y2 = min(y2,ymax)
-    x1 = max(x1,xmin)
-    x2 = min(x2,xmax)
-    return y1,y2,x1,x2
+    y1 = max(y1, ymin)
+    y2 = min(y2, ymax)
+    x1 = max(x1, xmin)
+    x2 = min(x2, xmax)
+    # todo for debug
+    w, h, c = rgb_original_image.shape
+    diff_expanded = np.zeros((w, h))
+    diff_expanded[y1:y2, x1:x2] = 1
+    diff_expanded_img = draw_mask_on_image(rgb_original_image, diff_expanded)
+    cv2.imwrite("/tmp/diff_expanded.jpg", diff_expanded_img)
+    return y1, y2, x1, x2
 
 
 def get_focus_cropv2(pred_mask, previous_mask, global_roi, y,x, ratio):
@@ -315,3 +324,68 @@ def random_choose_target(unknown, crop_size):
     y1,x1,y2,x2 = top, left, top + crop_h, left + crop_w
 
     return y1,x1,y2,x2
+
+
+def draw_mask_on_image(img, mask, clicks_list=None, alpha=0.5,
+                               pos_color=(0, 255, 0), neg_color=(0, 0, 255),
+                               radius=4):
+
+    if torch.is_tensor(img):
+        img = img.numpy()
+    if torch.is_tensor(mask):
+        mask = mask.numpy()
+    logger.info("img shape {} mask shape {}", img.shape, mask.shape)
+    result = img.copy()
+    # return result
+
+    if mask is not None:
+        mask[mask > .5] = 1
+        palette = np.array([[0,0,0],[0,125,128]])
+
+        rgb_mask = palette[mask.astype(np.uint8)]
+
+        mask_region = (mask > 0).astype(np.uint8)
+        logger.info("mask region shape {}, result shape {}", mask_region.shape, result.shape)
+        result = (result * (1 - mask_region[:, :, np.newaxis]) +
+                  (1 - alpha) * mask_region[:, :, np.newaxis] * result + alpha * rgb_mask)
+        result = result.astype(np.uint8)
+
+    if clicks_list is not None and len(clicks_list) > 0:
+        pos_points = [click.coords for click in clicks_list if click.is_positive]
+        neg_points = [click.coords for click in clicks_list if not click.is_positive]
+        result = draw_points(result, pos_points, pos_color, radius=radius, inplace=True)
+        result = draw_points(result, neg_points, neg_color, radius=radius, inplace=True)
+    return result
+
+
+def draw_points(image, points, color, radius=3, inplace=False):
+    if not inplace:
+        image = image.copy()
+    for p in points:
+        if p[0] < 0:
+            continue
+        if len(p) == 3:
+            pradius = {0: 8, 1: 6, 2: 4}[p[2]] if p[2] < 3 else 2
+        else:
+            pradius = radius
+        cv2.circle(image, (int(p[1]), int(p[0])), pradius, color, -1)
+    return image
+
+
+@lru_cache(maxsize=16)
+def get_palette(num_cls):
+    num_cls = int(num_cls)
+    palette = np.zeros(3 * num_cls, dtype=np.int32)
+
+    for j in range(0, num_cls):
+        lab = j
+        i = 0
+
+        while lab > 0:
+            palette[j*3 + 0] |= (((lab >> 0) & 1) << (7-i))
+            palette[j*3 + 1] |= (((lab >> 1) & 1) << (7-i))
+            palette[j*3 + 2] |= (((lab >> 2) & 1) << (7-i))
+            i = i + 1
+            lab >>= 3
+
+    return palette.reshape((-1, 3))

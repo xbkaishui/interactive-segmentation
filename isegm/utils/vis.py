@@ -1,6 +1,7 @@
 from functools import lru_cache
 import cv2
 import numpy as np
+from loguru import logger
 
 
 def visualize_instances(imask, bg_color=255,
@@ -140,6 +141,7 @@ def draw_with_blend_and_clicks(img, mask=None, alpha=0.6, clicks_list=None,
         rgb_mask = palette[mask.astype(np.uint8)]
 
         mask_region = (mask > 0).astype(np.uint8)
+        logger.info("mask region shape {}, result shape {}", mask_region.shape, result.shape)
         result = (result * (1 - mask_region[:, :, np.newaxis]) +
                   (1 - alpha) * mask_region[:, :, np.newaxis] * result + alpha * rgb_mask)
 

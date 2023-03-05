@@ -65,9 +65,10 @@ class InteractiveController:
         previous_mask = previous_mask.astype(np.uint8)
         pred = self.predictor.get_prediction(self.clicker, prev_mask=None)
         # pred = self.predictor.get_prediction(self.clicker, prev_mask=torch.from_numpy(previous_mask).unsqueeze(0).unsqueeze(0))
-        logger.info("pred shape {} \n values {}", pred.shape, pred)
+        logger.info("pred shape {}", pred.shape)
         torch.cuda.empty_cache()
 
+        # todo 这里实现的逻辑有问题，不能覆盖原有的mask
         if self.probs_history:
             self.probs_history.append((self.probs_history[-1][0], pred))
         else:
@@ -158,6 +159,7 @@ class InteractiveController:
     def current_object_prob(self):
         if self.probs_history:
             current_prob_total, current_prob_additive = self.probs_history[-1]
+            logger.info("current_prob_total shape {} current_prob_additive shape {}", current_prob_total.shape, current_prob_additive.shape)
             return np.maximum(current_prob_total, current_prob_additive)
         else:
             return None
@@ -170,6 +172,7 @@ class InteractiveController:
     def result_mask(self):
         result_mask = self._result_mask.copy()
         if self.probs_history:
+            logger.info("filter mask prob {}", self.prob_thresh)
             result_mask[self.current_object_prob > self.prob_thresh] = self.object_count + 1
         return result_mask
 
